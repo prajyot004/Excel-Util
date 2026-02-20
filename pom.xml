@@ -1,0 +1,86 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.prajyotsable</groupId>
+  <artifactId>stream-batch-insert</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>Stream Batch Insert</name>
+  <description>Lightweight JDBC batch insert utility with retry and streaming support</description>
+  <url>https://github.com/prajyotsable/stream-batch-insert</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Prajyot Sable</name>
+      <email>prajyotsable04@gmail.com</email>
+    </developer>
+  </developers>
+
+  <scm>
+    <connection>scm:git:git://github.com/prajyotsable/stream-batch-insert.git</connection>
+    <developerConnection>scm:git:ssh://github.com:prajyotsable/stream-batch-insert.git</developerConnection>
+    <url>https://github.com/prajyotsable/stream-batch-insert</url>
+  </scm>
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-core</artifactId>
+      <version>2.25.3</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-api</artifactId>
+      <version>2.25.3</version>
+    </dependency>
+
+    <!-- Source: https://mvnrepository.com/artifact/org.projectlombok/lombok -->
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>1.18.42</version>
+      <scope>compile</scope>
+    </dependency>
+
+    <!-- Apache POI Streaming API for memory-efficient Excel generation -->
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-ooxml</artifactId>
+      <version>5.2.5</version>
+    </dependency>
+
+  </dependencies>
+
+  <build>
+    <plugins>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+
+    </plugins>
+  </build>
+
+</project>
