@@ -10,6 +10,7 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -30,7 +31,9 @@ import java.util.List;
  */
 public class CsvGenerationUtil {
 
-    /** 256 KB buffer — batches writes, minimises OS syscall count. */
+    /**
+     * 256 KB buffer — batches writes, minimises OS syscall count.
+     */
     private static final int BUFFER_SIZE = 256 * 1024;
 
     // =========================================================================
@@ -81,7 +84,42 @@ public class CsvGenerationUtil {
     }
 
     // =========================================================================
-    //  3. HTTP STREAM  –  recommended for large / frontend downloads
+    //  3. BASE64  –  for embedding in JSON / API responses
+    // =========================================================================
+
+    /**
+     * Generates the CSV as a Base64-encoded {@link String}.
+     *
+     * <p>Useful when the file must travel inside a JSON body
+     * (e.g. a REST API that returns {@code { "file": "<base64>" }}),
+     * in e-mail attachments, or in data-URI links.
+     *
+     * <p>Use in a Spring Boot controller like this:
+     * <pre>{@code
+     * String b64 = csvUtil.generateCsvAsBase64(records, UserRecord.class);
+     * return Map.of("fileName", "users.csv", "data", b64);
+     * }</pre>
+     *
+     * On the frontend you can decode and download it without a server round-trip:
+     * <pre>{@code
+     * const a = document.createElement('a');
+     * a.href     = 'data:text/csv;base64,' + response.data;
+     * a.download = response.fileName;
+     * a.click();
+     * }</pre>
+     *
+     * <p><b>Pros:</b> embeds cleanly in JSON; works across any transport.
+     * <br><b>Cons:</b> ~33 % size overhead vs raw bytes; entire file in heap
+     * (same constraint as {@link #generateCsvAsBytes}).
+     */
+    public <T> String generateCsvAsBase64(List<T> records, Class<T> type)
+            throws IOException {
+        byte[] bytes = generateCsvAsBytes(records, type);
+        return Base64.getEncoder().encodeToString(bytes);
+    }
+
+    // =========================================================================
+    //  4. HTTP STREAM  –  recommended for large / frontend downloads
     // =========================================================================
 
     /**
@@ -130,7 +168,7 @@ public class CsvGenerationUtil {
     private <T> void writeContent(List<T> records, Class<T> type,
                                   OutputStream outputStream) throws IOException {
 
-        Field[]        fields  = type.getDeclaredFields();
+        Field[] fields = type.getDeclaredFields();
         MethodHandle[] getters = buildGetters(fields); // built once, reused every row
 
         // NOT try-with-resources: must not close the caller's stream
@@ -142,8 +180,8 @@ public class CsvGenerationUtil {
         writer.newLine();
 
         // Data rows – reuse one StringBuilder, zero per-row heap allocation
-        StringBuilder sb    = new StringBuilder(fields.length * 16);
-        int           total = records.size();
+        StringBuilder sb = new StringBuilder(fields.length * 16);
+        int total = records.size();
 
         for (int i = 0; i < total; i++) {
             T record = records.get(i);
@@ -179,12 +217,14 @@ public class CsvGenerationUtil {
         return sb.toString();
     }
 
-    /** Wraps {@code value} in double-quotes if it contains , " \r \n; doubles any " inside. */
+    /**
+     * Wraps {@code value} in double-quotes if it contains , " \r \n; doubles any " inside.
+     */
     private static void appendEscaped(StringBuilder sb, String value) {
-        boolean needsQuoting = value.indexOf(',')  >= 0
-                            || value.indexOf('"')  >= 0
-                            || value.indexOf('\n') >= 0
-                            || value.indexOf('\r') >= 0;
+        boolean needsQuoting = value.indexOf(',') >= 0
+                || value.indexOf('"') >= 0
+                || value.indexOf('\n') >= 0
+                || value.indexOf('\r') >= 0;
         if (!needsQuoting) {
             sb.append(value);
             return;
@@ -208,8 +248,8 @@ public class CsvGenerationUtil {
      * critical for millions of invocations on large exports.
      */
     private static MethodHandle[] buildGetters(Field[] fields) {
-        MethodHandles.Lookup lookup  = MethodHandles.lookup();
-        MethodHandle[]       handles = new MethodHandle[fields.length];
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        MethodHandle[] handles = new MethodHandle[fields.length];
         for (int i = 0; i < fields.length; i++) {
             fields[i].setAccessible(true);
             try {

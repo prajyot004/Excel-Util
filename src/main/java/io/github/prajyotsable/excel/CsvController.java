@@ -8,7 +8,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * REST endpoint that streams a CSV file directly to the browser.
@@ -76,5 +78,59 @@ public class CsvController {
                 .contentType(MediaType.parseMediaType(
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(responseBody);
+    }
+
+    // ── Method 2: generateCsvAsBytes ─────────────────────────────────────────
+    /**
+     * Returns the entire CSV as a byte[] in the response body.
+     * Spring sets Content-Length automatically so the browser shows exact % progress.
+     * Capped at 100 000 rows — the full byte[] lives in JVM heap.
+     *
+     * Endpoint: GET /api/users/download/csv/bytes
+     */
+    @GetMapping("/download/csv/bytes")
+    public ResponseEntity<byte[]> downloadCsvAsBytes() throws IOException {
+        List<UserRecord> records = TestDataGenerator.generateUsers(1_000_000);
+        byte[] bytes = csvUtil.generateCsvAsBytes(records, UserRecord.class);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"users.csv\"")
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(bytes.length))
+                .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))
+                .body(bytes);
+    }
+
+    // ── Method 3: generateCsvAsBase64 ────────────────────────────────────────
+    /**
+     * Returns a JSON body { fileName, data } where data is Base64-encoded CSV.
+     * The browser JS decodes it locally and triggers a Blob download — no extra request.
+     * Capped at 100 000 rows — Base64 is ~33% larger than raw bytes.
+     *
+     * Endpoint: GET /api/users/download/csv/base64
+     */
+    @GetMapping("/download/csv/base64")
+    public ResponseEntity<Map<String, String>> downloadCsvAsBase64() throws IOException {
+        List<UserRecord> records = TestDataGenerator.generateUsers(1_000_000);
+        String base64 = csvUtil.generateCsvAsBase64(records, UserRecord.class);
+        return ResponseEntity.ok(Map.of("fileName", "users.csv", "data", base64));
+    }
+
+    // ── Method 1: generateCsvToFile ──────────────────────────────────────────
+    /**
+     * Saves the CSV directly to the server's local filesystem.
+     * Returns JSON with the absolute path where the file was written.
+     * Nothing is downloaded to the browser — this is a server-side write.
+     *
+     * Endpoint: GET /api/users/download/csv/file
+     */
+    @GetMapping("/download/csv/file")
+    public ResponseEntity<Map<String, String>> saveCsvToFile() throws IOException {
+        List<UserRecord> records = TestDataGenerator.generateUsers(1_000_000);
+        String path = "users_export.csv";
+        csvUtil.generateCsvToFile(records, UserRecord.class, path);
+        return ResponseEntity.ok(Map.of(
+                "method",  "generateCsvToFile",
+                "message", "File saved on server",
+                "path",    new java.io.File(path).getAbsolutePath()
+        ));
     }
 }
