@@ -1,10 +1,25 @@
 // ── Endpoints ────────────────────────────────────────────────────────────────
 const ENDPOINTS = {
-  csvStream : '/api/users/download/csv',         // Method 4 — streamCsvToResponse
-  csvBytes  : '/api/users/download/csv/bytes',   // Method 2 — generateCsvAsBytes
-  csvBase64 : '/api/users/download/csv/base64',  // Method 3 — generateCsvAsBase64
-  csvFile   : '/api/users/download/csv/file',    // Method 1 — generateCsvToFile
-  excel     : '/api/users/download/xlsx',        // Excel     — streamExcelToResponse
+  // CSV — auto headers
+  csvStream        : '/api/users/download/csv',                         // stream — zero heap
+  csvBytes         : '/api/users/download/csv/bytes',                   // byte[] — Content-Length
+  csvBase64        : '/api/users/download/csv/base64',                  // base64 — JSON body
+  csvFile          : '/api/users/download/csv/file',                    // server disk write
+  // CSV — custom headers
+  csvCustom        : '/api/users/download/csv/custom-headers',          // custom — stream
+  csvCustomBytes   : '/api/users/download/csv/custom-headers/bytes',    // custom — bytes
+  csvCustomBase64  : '/api/users/download/csv/custom-headers/base64',   // custom — base64
+  csvCustomFile    : '/api/users/download/csv/custom-headers/file',     // custom — server file
+  // Excel — auto headers
+  excel            : '/api/users/download/xlsx',                        // Excel stream
+  excelBytes       : '/api/users/download/xlsx/bytes',                  // Excel bytes
+  excelBase64      : '/api/users/download/xlsx/base64',                 // Excel base64
+  excelFile        : '/api/users/download/xlsx/file',                   // Excel server file
+  // Excel — custom headers
+  excelCustom      : '/api/users/download/xlsx/custom-headers',         // Excel custom — stream
+  excelCustomBytes : '/api/users/download/xlsx/custom-headers/bytes',   // Excel custom — bytes
+  excelCustomBase64: '/api/users/download/xlsx/custom-headers/base64',  // Excel custom — base64
+  excelCustomFile  : '/api/users/download/xlsx/custom-headers/file',    // Excel custom — file
 };
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
@@ -111,9 +126,172 @@ async function saveCsvToFile() {
   }
 }
 
+// ── Custom Headers: streamCsvToResponse with custom column list ──────────────
+// Headers: id, firstName, email, salary, department, createdDate
+// salary and department have no matching field in UserRecord → blank columns
+function downloadCsvCustomHeaders() {
+  downloadBinaryFile(ENDPOINTS.csvCustom, 'users_custom.csv', 'csvCustomBtn');
+}
+
 // ── Excel: streamExcelToResponse ──────────────────────────────────────────────
 function downloadExcel() {
   downloadBinaryFile(ENDPOINTS.excel, 'users.xlsx', 'excelBtn');
+}
+
+// ── Excel: generateExcelAsBytes ───────────────────────────────────────────
+function downloadExcelBytes() {
+  downloadBinaryFile(ENDPOINTS.excelBytes, 'users.xlsx', 'excelBytesBtn');
+}
+
+// ── Excel: generateExcelAsBase64 ──────────────────────────────────────────
+async function downloadExcelBase64() {
+  const btnId = 'excelBase64Btn';
+  uiBusy(btnId, true);
+  setStatus('⏳ Generating Base64 Excel on server…');
+  try {
+    const res  = await fetch(ENDPOINTS.excelBase64);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    setStatus('🔄 Decoding Base64 in browser…');
+    const json   = await res.json();
+    const binary = atob(json.data);
+    const buf    = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+    const blob   = new Blob([buf], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    triggerDownload(blob, json.fileName || 'users.xlsx');
+    setStatus(`✅ Done! (${formatBytes(blob.size)})`);
+    document.getElementById('progress').value = 100;
+  } catch (e) {
+    setStatus('❌ Error: ' + e.message);
+    console.error(e);
+  } finally {
+    uiBusy(btnId, false);
+  }
+}
+
+// ── Excel: generateExcel (save to server disk) ────────────────────────────
+async function saveExcelToFile() {
+  const btnId = 'excelFileBtn';
+  uiBusy(btnId, true);
+  setStatus('⏳ Writing Excel file on server disk…');
+  try {
+    const res  = await fetch(ENDPOINTS.excelFile);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const json = await res.json();
+    setStatus(`✅ ${json.message}\n📁 ${json.path}`);
+    document.getElementById('progress').value = 100;
+  } catch (e) {
+    setStatus('❌ Error: ' + e.message);
+    console.error(e);
+  } finally {
+    uiBusy(btnId, false);
+  }
+}
+
+// ── Excel: custom headers ─────────────────────────────────────────────────
+function downloadExcelCustomHeaders() {
+  downloadBinaryFile(ENDPOINTS.excelCustom, 'users_custom.xlsx', 'excelCustomBtn');
+}
+
+// ── CSV custom headers — bytes ────────────────────────────────────────────────
+function downloadCsvCustomHeadersBytes() {
+  downloadBinaryFile(ENDPOINTS.csvCustomBytes, 'users_custom.csv', 'csvCustomBytesBtn');
+}
+
+// ── CSV custom headers — base64 ───────────────────────────────────────────────
+async function downloadCsvCustomHeadersBase64() {
+  const btnId = 'csvCustomBase64Btn';
+  uiBusy(btnId, true);
+  setStatus('⏳ Generating Base64 CSV (custom headers) on server…');
+  try {
+    const res  = await fetch(ENDPOINTS.csvCustomBase64);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    setStatus('🔄 Decoding Base64 in browser…');
+    const json   = await res.json();
+    const binary = atob(json.data);
+    const buf    = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+    const blob   = new Blob([buf], { type: 'text/csv' });
+    triggerDownload(blob, json.fileName || 'users_custom.csv');
+    setStatus(`✅ Done! (${formatBytes(blob.size)})`);
+    document.getElementById('progress').value = 100;
+  } catch (e) {
+    setStatus('❌ Error: ' + e.message);
+    console.error(e);
+  } finally {
+    uiBusy(btnId, false);
+  }
+}
+
+// ── CSV custom headers — server file ─────────────────────────────────────────
+async function saveCsvCustomHeadersToFile() {
+  const btnId = 'csvCustomFileBtn';
+  uiBusy(btnId, true);
+  setStatus('⏳ Writing CSV (custom headers) to server disk…');
+  try {
+    const res  = await fetch(ENDPOINTS.csvCustomFile);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const json = await res.json();
+    setStatus(`✅ ${json.message}\n📁 ${json.path}`);
+    document.getElementById('progress').value = 100;
+  } catch (e) {
+    setStatus('❌ Error: ' + e.message);
+    console.error(e);
+  } finally {
+    uiBusy(btnId, false);
+  }
+}
+
+// ── Excel custom headers — bytes ──────────────────────────────────────────────
+function downloadExcelCustomHeadersBytes() {
+  downloadBinaryFile(ENDPOINTS.excelCustomBytes, 'users_custom.xlsx', 'excelCustomBytesBtn');
+}
+
+// ── Excel custom headers — base64 ─────────────────────────────────────────────
+async function downloadExcelCustomHeadersBase64() {
+  const btnId = 'excelCustomBase64Btn';
+  uiBusy(btnId, true);
+  setStatus('⏳ Generating Base64 Excel (custom headers) on server…');
+  try {
+    const res  = await fetch(ENDPOINTS.excelCustomBase64);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    setStatus('🔄 Decoding Base64 in browser…');
+    const json   = await res.json();
+    const binary = atob(json.data);
+    const buf    = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+    const blob   = new Blob([buf], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    triggerDownload(blob, json.fileName || 'users_custom.xlsx');
+    setStatus(`✅ Done! (${formatBytes(blob.size)})`);
+    document.getElementById('progress').value = 100;
+  } catch (e) {
+    setStatus('❌ Error: ' + e.message);
+    console.error(e);
+  } finally {
+    uiBusy(btnId, false);
+  }
+}
+
+// ── Excel custom headers — server file ────────────────────────────────────────
+async function saveExcelCustomHeadersToFile() {
+  const btnId = 'excelCustomFileBtn';
+  uiBusy(btnId, true);
+  setStatus('⏳ Writing Excel (custom headers) to server disk…');
+  try {
+    const res  = await fetch(ENDPOINTS.excelCustomFile);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const json = await res.json();
+    setStatus(`✅ ${json.message}\n📁 ${json.path}`);
+    document.getElementById('progress').value = 100;
+  } catch (e) {
+    setStatus('❌ Error: ' + e.message);
+    console.error(e);
+  } finally {
+    uiBusy(btnId, false);
+  }
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────

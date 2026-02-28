@@ -11,7 +11,9 @@ import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Memory-efficient CSV writer for any list of POJOs.
@@ -205,6 +207,146 @@ public class CsvGenerationUtil {
     }
 
     // =========================================================================
+    //  5. CUSTOM HEADERS  –  overloads for all 4 output types
+    //
+    //  Pass the column names you want in the CSV.  Each name is matched
+    //  case-sensitively against the DTO field names:
+    //    • match found  → value from the DTO field
+    //    • no match     → blank cell (column still appears in the file)
+    //  DTO fields that are NOT in the headers list are silently ignored.
+    // =========================================================================
+
+    /**
+     * Writes a CSV file to disk using a caller-supplied ordered list of column
+     * headers.  Headers that do not correspond to any field of {@code type}
+     * produce a blank column.
+     *
+     * @param headers ordered column names, e.g. {@code List.of("id","email","salary")}
+     */
+    public <T> void generateCsvToFile(List<T> records, Class<T> type,
+                                      List<String> headers, String fileName)
+            throws IOException {
+        validate(records);
+        validateHeaders(headers);
+        try (FileOutputStream fos = new FileOutputStream(fileName)) {
+            writeContentWithHeaders(records, type, headers, fos);
+        }
+        System.out.println("CSV (custom headers) saved to file: " + fileName);
+    }
+
+    /** Returns the CSV as {@code byte[]} using caller-supplied column headers. */
+    public <T> byte[] generateCsvAsBytes(List<T> records, Class<T> type,
+                                         List<String> headers)
+            throws IOException {
+        validate(records);
+        validateHeaders(headers);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream(records.size() * 64);
+        writeContentWithHeaders(records, type, headers, baos);
+        return baos.toByteArray();
+    }
+
+    /** Returns the CSV as a Base64 string using caller-supplied column headers. */
+    public <T> String generateCsvAsBase64(List<T> records, Class<T> type,
+                                          List<String> headers)
+            throws IOException {
+        return Base64.getEncoder().encodeToString(
+                generateCsvAsBytes(records, type, headers));
+    }
+
+    /**
+     * Streams the CSV with caller-supplied column headers into any
+     * {@link OutputStream} (e.g. an HTTP response socket).
+     */
+    public <T> void streamCsvToResponse(List<T> records, Class<T> type,
+                                        List<String> headers,
+                                        OutputStream responseStream)
+            throws IOException {
+        validate(records);
+        validateHeaders(headers);
+        writeContentWithHeaders(records, type, headers, responseStream);
+    }
+
+    // =========================================================================
+    //  Private core (custom headers)
+    // =========================================================================
+
+    /**
+     * Writes CSV content using a caller-supplied ordered list of column names.
+     *
+     * <p>Algorithm:
+     * <ol>
+     *   <li>Build a {@code fieldName → MethodHandle} map from every declared
+     *       field of {@code type}.</li>
+     *   <li>Walk {@code headers} in order; for each name look up its handle.
+     *       Store {@code null} when no matching field exists.</li>
+     *   <li>Write the header row using the supplied names verbatim.</li>
+     *   <li>For every data row: invoke the handle if non-null, otherwise
+     *       write an empty string (blank cell).</li>
+     * </ol>
+     */
+    private <T> void writeContentWithHeaders(List<T> records, Class<T> type,
+                                             List<String> headers,
+                                             OutputStream outputStream) throws IOException {
+
+        // ─ 1. Build fieldName → MethodHandle map ────────────────────────────────
+        Field[] allFields = type.getDeclaredFields();
+        Map<String, MethodHandle> handleMap = new HashMap<>(allFields.length * 2);
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        for (Field f : allFields) {
+            f.setAccessible(true);
+            try {
+                handleMap.put(f.getName(), lookup.unreflectGetter(f));
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException("Cannot create getter for: " + f.getName(), e);
+            }
+        }
+
+        // ─ 2. Resolve handles in header order (null = no matching DTO field) ───
+        int cols = headers.size();
+        MethodHandle[] getters = new MethodHandle[cols];
+        for (int i = 0; i < cols; i++) {
+            getters[i] = handleMap.get(headers.get(i)); // null if not found in DTO
+        }
+
+        // NOT try-with-resources: must not close the caller's stream
+        BufferedWriter writer = new BufferedWriter(
+                new OutputStreamWriter(outputStream, StandardCharsets.UTF_8), BUFFER_SIZE);
+
+        // ─ 3. Header row ─────────────────────────────────────────────────
+        StringBuilder sb = new StringBuilder(cols * 16);
+        for (int i = 0; i < cols; i++) {
+            if (i > 0) sb.append(',');
+            appendEscaped(sb, headers.get(i));
+        }
+        writer.write(sb.toString());
+        writer.newLine();
+
+        // ─ 4. Data rows ─────────────────────────────────────────────────
+        int total = records.size();
+        for (int i = 0; i < total; i++) {
+            T record = records.get(i);
+            sb.setLength(0);
+            for (int col = 0; col < cols; col++) {
+                if (col > 0) sb.append(',');
+                if (getters[col] == null) {
+                    // header has no matching DTO field → blank cell
+                    continue;
+                }
+                try {
+                    Object val = getters[col].invoke(record);
+                    appendEscaped(sb, val == null ? "" : val.toString());
+                } catch (Throwable e) {
+                    sb.append("N/A");
+                }
+            }
+            writer.write(sb.toString());
+            writer.newLine();
+        }
+
+        writer.flush();
+    }
+
+    // =========================================================================
     //  RFC 4180 helpers
     // =========================================================================
 
@@ -269,5 +411,10 @@ public class CsvGenerationUtil {
     private static void validate(List<?> records) {
         if (records == null || records.isEmpty())
             throw new IllegalArgumentException("Records list must not be null or empty");
+    }
+
+    private static void validateHeaders(List<String> headers) {
+        if (headers == null || headers.isEmpty())
+            throw new IllegalArgumentException("Headers list must not be null or empty");
     }
 }

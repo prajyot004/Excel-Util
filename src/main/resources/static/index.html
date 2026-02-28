@@ -113,11 +113,63 @@
     </div>
   </div>
 
-  <div class="section-label">Excel Export</div>
+  <div class="section-label">CSV Export — Custom Headers (4 methods)</div>
   <div class="btn-grid">
     <div class="btn-item">
-      <button id="excelBtn" onclick="downloadExcel()" class="btn-excel">⬇ Stream (.xlsx)</button>
-      <span class="hint">streamExcelToResponse · SXSSF · 1M rows</span>
+      <button id="csvCustomBtn" onclick="downloadCsvCustomHeaders()" class="btn-purple">⬇ CH Stream</button>
+      <span class="hint">streamCsvToResponse · custom headers · zero heap</span>
+    </div>
+    <div class="btn-item">
+      <button id="csvCustomBytesBtn" onclick="downloadCsvCustomHeadersBytes()" class="btn-purple">⬇ CH Bytes</button>
+      <span class="hint">generateCsvAsBytes · custom headers · Content-Length</span>
+    </div>
+    <div class="btn-item">
+      <button id="csvCustomBase64Btn" onclick="downloadCsvCustomHeadersBase64()" class="btn-orange">⬇ CH Base64</button>
+      <span class="hint">generateCsvAsBase64 · custom headers · JSON body</span>
+    </div>
+    <div class="btn-item">
+      <button id="csvCustomFileBtn" onclick="saveCsvCustomHeadersToFile()" class="btn-gray">💾 CH Server File</button>
+      <span class="hint">generateCsvToFile · custom headers · server disk</span>
+    </div>
+  </div>
+
+  <div class="section-label">Excel Export (4 methods)</div>
+  <div class="btn-grid">
+    <div class="btn-item">
+      <button id="excelBtn" onclick="downloadExcel()" class="btn-excel">⬇ Stream</button>
+      <span class="hint">streamExcelToResponse · zero heap · 1M rows</span>
+    </div>
+    <div class="btn-item">
+      <button id="excelBytesBtn" onclick="downloadExcelBytes()" class="btn-purple">⬇ Bytes</button>
+      <span class="hint">generateExcelAsBytes · Content-Length · 100K rows</span>
+    </div>
+    <div class="btn-item">
+      <button id="excelBase64Btn" onclick="downloadExcelBase64()" class="btn-orange">⬇ Base64</button>
+      <span class="hint">generateExcelAsBase64 · JSON body · 100K rows</span>
+    </div>
+    <div class="btn-item">
+      <button id="excelFileBtn" onclick="saveExcelToFile()" class="btn-gray">💾 Server File</button>
+      <span class="hint">generateExcel · saves to server disk · 1M rows</span>
+    </div>
+  </div>
+
+  <div class="section-label">Excel Export — Custom Headers (4 methods)</div>
+  <div class="btn-grid">
+    <div class="btn-item">
+      <button id="excelCustomBtn" onclick="downloadExcelCustomHeaders()" class="btn-excel">⬇ CH Stream</button>
+      <span class="hint">streamExcelToResponse · custom headers · zero heap</span>
+    </div>
+    <div class="btn-item">
+      <button id="excelCustomBytesBtn" onclick="downloadExcelCustomHeadersBytes()" class="btn-purple">⬇ CH Bytes</button>
+      <span class="hint">generateExcelAsBytes · custom headers · Content-Length</span>
+    </div>
+    <div class="btn-item">
+      <button id="excelCustomBase64Btn" onclick="downloadExcelCustomHeadersBase64()" class="btn-orange">⬇ CH Base64</button>
+      <span class="hint">generateExcelAsBase64 · custom headers · JSON body</span>
+    </div>
+    <div class="btn-item">
+      <button id="excelCustomFileBtn" onclick="saveExcelCustomHeadersToFile()" class="btn-gray">💾 CH Server File</button>
+      <span class="hint">generateExcel · custom headers · server disk</span>
     </div>
   </div>
 
@@ -125,7 +177,7 @@
   <div id="status"></div>
 </div>
 
-<script src="download.js?v=2"></script>
+<script src="download.js?v=5"></script>
 
 </body>
 </html>
