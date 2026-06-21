@@ -1,304 +1,394 @@
+// =========================================================================
+//  Excel Utils — Export Dashboard — JavaScript
+//  Handles all 16 endpoints: CSV (4 methods × 2 header modes) +
+//                             Excel (4 methods × 2 header modes)
+// =========================================================================
+
 // ── Endpoints ────────────────────────────────────────────────────────────────
 const ENDPOINTS = {
   // CSV — auto headers
-  csvStream        : '/api/users/download/csv',                         // stream — zero heap
-  csvBytes         : '/api/users/download/csv/bytes',                   // byte[] — Content-Length
-  csvBase64        : '/api/users/download/csv/base64',                  // base64 — JSON body
-  csvFile          : '/api/users/download/csv/file',                    // server disk write
+  csvStream        : '/api/users/download/csv',
+  csvBytes         : '/api/users/download/csv/bytes',
+  csvBase64        : '/api/users/download/csv/base64',
+  csvFile          : '/api/users/download/csv/file',
   // CSV — custom headers
-  csvCustom        : '/api/users/download/csv/custom-headers',          // custom — stream
-  csvCustomBytes   : '/api/users/download/csv/custom-headers/bytes',    // custom — bytes
-  csvCustomBase64  : '/api/users/download/csv/custom-headers/base64',   // custom — base64
-  csvCustomFile    : '/api/users/download/csv/custom-headers/file',     // custom — server file
+  csvCustom        : '/api/users/download/csv/custom-headers',
+  csvCustomBytes   : '/api/users/download/csv/custom-headers/bytes',
+  csvCustomBase64  : '/api/users/download/csv/custom-headers/base64',
+  csvCustomFile    : '/api/users/download/csv/custom-headers/file',
   // Excel — auto headers
-  excel            : '/api/users/download/xlsx',                        // Excel stream
-  excelBytes       : '/api/users/download/xlsx/bytes',                  // Excel bytes
-  excelBase64      : '/api/users/download/xlsx/base64',                 // Excel base64
-  excelFile        : '/api/users/download/xlsx/file',                   // Excel server file
+  excel            : '/api/users/download/xlsx',
+  excelBytes       : '/api/users/download/xlsx/bytes',
+  excelBase64      : '/api/users/download/xlsx/base64',
+  excelFile        : '/api/users/download/xlsx/file',
   // Excel — custom headers
-  excelCustom      : '/api/users/download/xlsx/custom-headers',         // Excel custom — stream
-  excelCustomBytes : '/api/users/download/xlsx/custom-headers/bytes',   // Excel custom — bytes
-  excelCustomBase64: '/api/users/download/xlsx/custom-headers/base64',  // Excel custom — base64
-  excelCustomFile  : '/api/users/download/xlsx/custom-headers/file',    // Excel custom — file
+  excelCustom      : '/api/users/download/xlsx/custom-headers',
+  excelCustomBytes : '/api/users/download/xlsx/custom-headers/bytes',
+  excelCustomBase64: '/api/users/download/xlsx/custom-headers/base64',
+  excelCustomFile  : '/api/users/download/xlsx/custom-headers/file',
 };
 
-// ── UI helpers ────────────────────────────────────────────────────────────────
-function uiBusy(btnId, busy) {
-  const btn = document.getElementById(btnId);
-  if (btn) btn.disabled = busy;
-  const p = document.getElementById('progress');
-  if (busy) {
-    p.style.display = 'block';
-    p.removeAttribute('value'); // indeterminate spinner
-  } else {
-    setTimeout(() => { p.style.display = 'none'; }, 2000);
-  }
-}
-function setStatus(msg) { document.getElementById('status').textContent = msg; }
-function formatBytes(n) {
-  if (n < 1024)    return n + ' B';
-  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
-  return (n / 1048576).toFixed(2) + ' MB';
+// ── Tab Switching ────────────────────────────────────────────────────────────
+function switchTab(tabName) {
+  // Deactivate all tabs
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.remove('active');
+    t.setAttribute('aria-selected', 'false');
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+
+  // Activate selected
+  const tab = document.getElementById('tab-' + tabName);
+  const panel = document.getElementById('panel-' + tabName);
+  if (tab)   { tab.classList.add('active'); tab.setAttribute('aria-selected', 'true'); }
+  if (panel) panel.classList.add('active');
 }
 
-// ── Shared: fetch → Blob → save ───────────────────────────────────────────────
-// Used by Stream, Bytes, and Excel — all return a binary file body.
-async function downloadBinaryFile(apiUrl, defaultFileName, btnId) {
-  uiBusy(btnId, true);
-  setStatus('⏳ Generating on server…');
+// ── Time Helper ──────────────────────────────────────────────────────────────
+function timestamp() {
+  const now = new Date();
+  return now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// Set initial time
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('initialTime');
+  if (el) el.textContent = timestamp();
+});
+
+// ── Status / Log System ─────────────────────────────────────────────────────
+function addLog(type, msg) {
+  const log = document.getElementById('statusLog');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry ' + type;
+  entry.innerHTML = `<span class="log-time">${timestamp()}</span><span class="log-msg">${msg}</span>`;
+  log.appendChild(entry);
+  // Auto-scroll to bottom
+  log.scrollTop = log.scrollHeight;
+}
+
+function clearLog() {
+  const log = document.getElementById('statusLog');
+  log.innerHTML = '';
+  addLog('info', 'Log cleared — ready for new exports.');
+  setProgress(false);
+}
+
+function setProgress(active, value) {
+  const wrap = document.getElementById('progressWrap');
+  const bar = document.getElementById('progressBar');
+
+  if (!active) {
+    wrap.classList.remove('active');
+    bar.classList.remove('indeterminate');
+    bar.style.width = '0%';
+    return;
+  }
+
+  wrap.classList.add('active');
+
+  if (value === undefined || value === null) {
+    // Indeterminate
+    bar.classList.add('indeterminate');
+    bar.style.width = '30%';
+  } else {
+    bar.classList.remove('indeterminate');
+    bar.style.width = Math.min(100, Math.max(0, value)) + '%';
+  }
+}
+
+function formatBytes(n) {
+  if (n < 1024)       return n + ' B';
+  if (n < 1048576)    return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(2) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+
+// ── Card State Management ───────────────────────────────────────────────────
+function setCardActive(cardId, active) {
+  const card = cardId ? document.getElementById(cardId) : null;
+  if (card) {
+    if (active) {
+      card.classList.add('active-download');
+    } else {
+      card.classList.remove('active-download');
+      card.classList.add('success-flash');
+      setTimeout(() => card.classList.remove('success-flash'), 1000);
+    }
+  }
+}
+
+function setBtnLoading(btnId, loading) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = loading;
+  if (loading) {
+    btn.classList.add('loading');
+  } else {
+    btn.classList.remove('loading');
+  }
+}
+
+// ── Generic: Binary File Download (Stream / Bytes / Excel Stream) ────────────
+async function downloadBinaryFile(apiUrl, defaultFileName, btnId, cardId, label) {
+  setBtnLoading(btnId, true);
+  setCardActive(cardId, true);
+  setProgress(true);
+  addLog('loading', `⏳ <strong>${label}</strong> — Generating on server…`);
+
+  const startTime = performance.now();
+
   try {
     const res = await fetch(apiUrl);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    setStatus('⬇ Downloading…');
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+
+    addLog('loading', `⬇ <strong>${label}</strong> — Downloading…`);
+
     const blob = await res.blob();
     const cd   = res.headers.get('Content-Disposition') || '';
     const m    = cd.match(/filename[^;=\n]*=["']?([^"';\n]+)/i);
-    triggerDownload(blob, m ? m[1].trim() : defaultFileName);
-    setStatus(`✅ Done! (${formatBytes(blob.size)})`);
-    document.getElementById('progress').value = 100;
+    const fileName = m ? m[1].trim() : defaultFileName;
+
+    triggerDownload(blob, fileName);
+
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+    setProgress(true, 100);
+    addLog('success', `✅ <strong>${label}</strong> — ${formatBytes(blob.size)} downloaded as <em>${fileName}</em> in ${elapsed}s`);
+
+    setTimeout(() => setProgress(false), 2000);
   } catch (e) {
-    setStatus('❌ Error: ' + e.message);
+    setProgress(false);
+    addLog('error', `❌ <strong>${label}</strong> — ${e.message}`);
     console.error(e);
   } finally {
-    uiBusy(btnId, false);
+    setBtnLoading(btnId, false);
+    setCardActive(cardId, false);
   }
 }
 
-// ── Method 4: streamCsvToResponse ─────────────────────────────────────────────
-// Server pipes rows straight to socket — zero intermediate heap buffer.
-// Content-Length is NOT set (size unknown until fully written).
+// ── Generic: Base64 JSON Download ────────────────────────────────────────────
+async function downloadBase64File(apiUrl, defaultFileName, mimeType, btnId, cardId, label) {
+  setBtnLoading(btnId, true);
+  setCardActive(cardId, true);
+  setProgress(true);
+  addLog('loading', `⏳ <strong>${label}</strong> — Generating Base64 on server…`);
+
+  const startTime = performance.now();
+
+  try {
+    const res = await fetch(apiUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+
+    addLog('loading', `🔄 <strong>${label}</strong> — Decoding Base64 in browser…`);
+
+    const json   = await res.json();
+    const binary = atob(json.data);
+    const buf    = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+    const blob   = new Blob([buf], { type: mimeType });
+    const fileName = json.fileName || defaultFileName;
+
+    triggerDownload(blob, fileName);
+
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+    setProgress(true, 100);
+    addLog('success', `✅ <strong>${label}</strong> — ${formatBytes(blob.size)} decoded and saved as <em>${fileName}</em> in ${elapsed}s`);
+
+    setTimeout(() => setProgress(false), 2000);
+  } catch (e) {
+    setProgress(false);
+    addLog('error', `❌ <strong>${label}</strong> — ${e.message}`);
+    console.error(e);
+  } finally {
+    setBtnLoading(btnId, false);
+    setCardActive(cardId, false);
+  }
+}
+
+// ── Generic: Server File Save ────────────────────────────────────────────────
+async function saveToServerFile(apiUrl, btnId, cardId, label) {
+  setBtnLoading(btnId, true);
+  setCardActive(cardId, true);
+  setProgress(true);
+  addLog('loading', `⏳ <strong>${label}</strong> — Writing file on server disk…`);
+
+  const startTime = performance.now();
+
+  try {
+    const res = await fetch(apiUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+
+    const json = await res.json();
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+
+    setProgress(true, 100);
+    addLog('success', `✅ <strong>${label}</strong> — ${json.message} in ${elapsed}s<br>&nbsp;&nbsp;&nbsp;&nbsp;📁 <code>${json.path}</code>`);
+
+    setTimeout(() => setProgress(false), 2000);
+  } catch (e) {
+    setProgress(false);
+    addLog('error', `❌ <strong>${label}</strong> — ${e.message}`);
+    console.error(e);
+  } finally {
+    setBtnLoading(btnId, false);
+    setCardActive(cardId, false);
+  }
+}
+
+// =========================================================================
+//  CSV — Auto Headers (4 endpoints)
+// =========================================================================
+
 function downloadCsvStream() {
-  downloadBinaryFile(ENDPOINTS.csvStream, 'users.csv', 'csvStreamBtn');
+  downloadBinaryFile(
+    ENDPOINTS.csvStream, 'users.csv',
+    'csvStreamBtn', 'card-csvStream',
+    'CSV Stream'
+  );
 }
 
-// ── Method 2: generateCsvAsBytes ──────────────────────────────────────────────
-// Server builds byte[] in memory then sends it.
-// Content-Length IS set → browser shows exact download-progress %.
 function downloadCsvBytes() {
-  downloadBinaryFile(ENDPOINTS.csvBytes, 'users.csv', 'csvBytesBtn');
+  downloadBinaryFile(
+    ENDPOINTS.csvBytes, 'users.csv',
+    'csvBytesBtn', 'card-csvBytes',
+    'CSV Bytes'
+  );
 }
 
-// ── Method 3: generateCsvAsBase64 ─────────────────────────────────────────────
-// Response is JSON: { fileName: "users.csv", data: "<base64>" }
-// We decode Base64 in the browser into a Uint8Array Blob — no extra HTTP request.
-async function downloadCsvBase64() {
-  const btnId = 'csvBase64Btn';
-  uiBusy(btnId, true);
-  setStatus('⏳ Generating Base64 on server…');
-  try {
-    const res  = await fetch(ENDPOINTS.csvBase64);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    setStatus('🔄 Decoding Base64 in browser…');
-    const json   = await res.json();
-    const binary = atob(json.data);                // Base64 → binary string
-    const buf    = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
-    const blob   = new Blob([buf], { type: 'text/csv' });
-    triggerDownload(blob, json.fileName || 'users.csv');
-    setStatus(`✅ Done! (${formatBytes(blob.size)})`);
-    document.getElementById('progress').value = 100;
-  } catch (e) {
-    setStatus('❌ Error: ' + e.message);
-    console.error(e);
-  } finally {
-    uiBusy(btnId, false);
-  }
+function downloadCsvBase64() {
+  downloadBase64File(
+    ENDPOINTS.csvBase64, 'users.csv', 'text/csv',
+    'csvBase64Btn', 'card-csvBase64',
+    'CSV Base64'
+  );
 }
 
-// ── Method 1: generateCsvToFile ───────────────────────────────────────────────
-// No file download — triggers a server-side write to disk.
-// Response is JSON: { method, message, path }
-async function saveCsvToFile() {
-  const btnId = 'csvFileBtn';
-  uiBusy(btnId, true);
-  setStatus('⏳ Writing file on server disk…');
-  try {
-    const res  = await fetch(ENDPOINTS.csvFile);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const json = await res.json();
-    setStatus(`✅ ${json.message}\n📁 ${json.path}`);
-    document.getElementById('progress').value = 100;
-  } catch (e) {
-    setStatus('❌ Error: ' + e.message);
-    console.error(e);
-  } finally {
-    uiBusy(btnId, false);
-  }
+function saveCsvToFile() {
+  saveToServerFile(
+    ENDPOINTS.csvFile,
+    'csvFileBtn', 'card-csvFile',
+    'CSV Server File'
+  );
 }
 
-// ── Custom Headers: streamCsvToResponse with custom column list ──────────────
-// Headers: id, firstName, email, salary, department, createdDate
-// salary and department have no matching field in UserRecord → blank columns
+// =========================================================================
+//  CSV — Custom Headers (4 endpoints)
+// =========================================================================
+
 function downloadCsvCustomHeaders() {
-  downloadBinaryFile(ENDPOINTS.csvCustom, 'users_custom.csv', 'csvCustomBtn');
+  downloadBinaryFile(
+    ENDPOINTS.csvCustom, 'users_custom.csv',
+    'csvCustomBtn', 'card-csvCustomStream',
+    'CSV Custom Stream'
+  );
 }
 
-// ── Excel: streamExcelToResponse ──────────────────────────────────────────────
-function downloadExcel() {
-  downloadBinaryFile(ENDPOINTS.excel, 'users.xlsx', 'excelBtn');
-}
-
-// ── Excel: generateExcelAsBytes ───────────────────────────────────────────
-function downloadExcelBytes() {
-  downloadBinaryFile(ENDPOINTS.excelBytes, 'users.xlsx', 'excelBytesBtn');
-}
-
-// ── Excel: generateExcelAsBase64 ──────────────────────────────────────────
-async function downloadExcelBase64() {
-  const btnId = 'excelBase64Btn';
-  uiBusy(btnId, true);
-  setStatus('⏳ Generating Base64 Excel on server…');
-  try {
-    const res  = await fetch(ENDPOINTS.excelBase64);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    setStatus('🔄 Decoding Base64 in browser…');
-    const json   = await res.json();
-    const binary = atob(json.data);
-    const buf    = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
-    const blob   = new Blob([buf], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
-    triggerDownload(blob, json.fileName || 'users.xlsx');
-    setStatus(`✅ Done! (${formatBytes(blob.size)})`);
-    document.getElementById('progress').value = 100;
-  } catch (e) {
-    setStatus('❌ Error: ' + e.message);
-    console.error(e);
-  } finally {
-    uiBusy(btnId, false);
-  }
-}
-
-// ── Excel: generateExcel (save to server disk) ────────────────────────────
-async function saveExcelToFile() {
-  const btnId = 'excelFileBtn';
-  uiBusy(btnId, true);
-  setStatus('⏳ Writing Excel file on server disk…');
-  try {
-    const res  = await fetch(ENDPOINTS.excelFile);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const json = await res.json();
-    setStatus(`✅ ${json.message}\n📁 ${json.path}`);
-    document.getElementById('progress').value = 100;
-  } catch (e) {
-    setStatus('❌ Error: ' + e.message);
-    console.error(e);
-  } finally {
-    uiBusy(btnId, false);
-  }
-}
-
-// ── Excel: custom headers ─────────────────────────────────────────────────
-function downloadExcelCustomHeaders() {
-  downloadBinaryFile(ENDPOINTS.excelCustom, 'users_custom.xlsx', 'excelCustomBtn');
-}
-
-// ── CSV custom headers — bytes ────────────────────────────────────────────────
 function downloadCsvCustomHeadersBytes() {
-  downloadBinaryFile(ENDPOINTS.csvCustomBytes, 'users_custom.csv', 'csvCustomBytesBtn');
+  downloadBinaryFile(
+    ENDPOINTS.csvCustomBytes, 'users_custom.csv',
+    'csvCustomBytesBtn', 'card-csvCustomBytes',
+    'CSV Custom Bytes'
+  );
 }
 
-// ── CSV custom headers — base64 ───────────────────────────────────────────────
-async function downloadCsvCustomHeadersBase64() {
-  const btnId = 'csvCustomBase64Btn';
-  uiBusy(btnId, true);
-  setStatus('⏳ Generating Base64 CSV (custom headers) on server…');
-  try {
-    const res  = await fetch(ENDPOINTS.csvCustomBase64);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    setStatus('🔄 Decoding Base64 in browser…');
-    const json   = await res.json();
-    const binary = atob(json.data);
-    const buf    = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
-    const blob   = new Blob([buf], { type: 'text/csv' });
-    triggerDownload(blob, json.fileName || 'users_custom.csv');
-    setStatus(`✅ Done! (${formatBytes(blob.size)})`);
-    document.getElementById('progress').value = 100;
-  } catch (e) {
-    setStatus('❌ Error: ' + e.message);
-    console.error(e);
-  } finally {
-    uiBusy(btnId, false);
-  }
+function downloadCsvCustomHeadersBase64() {
+  downloadBase64File(
+    ENDPOINTS.csvCustomBase64, 'users_custom.csv', 'text/csv',
+    'csvCustomBase64Btn', 'card-csvCustomBase64',
+    'CSV Custom Base64'
+  );
 }
 
-// ── CSV custom headers — server file ─────────────────────────────────────────
-async function saveCsvCustomHeadersToFile() {
-  const btnId = 'csvCustomFileBtn';
-  uiBusy(btnId, true);
-  setStatus('⏳ Writing CSV (custom headers) to server disk…');
-  try {
-    const res  = await fetch(ENDPOINTS.csvCustomFile);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const json = await res.json();
-    setStatus(`✅ ${json.message}\n📁 ${json.path}`);
-    document.getElementById('progress').value = 100;
-  } catch (e) {
-    setStatus('❌ Error: ' + e.message);
-    console.error(e);
-  } finally {
-    uiBusy(btnId, false);
-  }
+function saveCsvCustomHeadersToFile() {
+  saveToServerFile(
+    ENDPOINTS.csvCustomFile,
+    'csvCustomFileBtn', 'card-csvCustomFile',
+    'CSV Custom Server File'
+  );
 }
 
-// ── Excel custom headers — bytes ──────────────────────────────────────────────
+// =========================================================================
+//  Excel — Auto Headers (4 endpoints)
+// =========================================================================
+
+function downloadExcel() {
+  downloadBinaryFile(
+    ENDPOINTS.excel, 'users.xlsx',
+    'excelBtn', 'card-excelStream',
+    'Excel Stream'
+  );
+}
+
+function downloadExcelBytes() {
+  downloadBinaryFile(
+    ENDPOINTS.excelBytes, 'users.xlsx',
+    'excelBytesBtn', 'card-excelBytes',
+    'Excel Bytes'
+  );
+}
+
+function downloadExcelBase64() {
+  downloadBase64File(
+    ENDPOINTS.excelBase64, 'users.xlsx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'excelBase64Btn', 'card-excelBase64',
+    'Excel Base64'
+  );
+}
+
+function saveExcelToFile() {
+  saveToServerFile(
+    ENDPOINTS.excelFile,
+    'excelFileBtn', 'card-excelFile',
+    'Excel Server File'
+  );
+}
+
+// =========================================================================
+//  Excel — Custom Headers (4 endpoints)
+// =========================================================================
+
+function downloadExcelCustomHeaders() {
+  downloadBinaryFile(
+    ENDPOINTS.excelCustom, 'users_custom.xlsx',
+    'excelCustomBtn', 'card-excelCustomStream',
+    'Excel Custom Stream'
+  );
+}
+
 function downloadExcelCustomHeadersBytes() {
-  downloadBinaryFile(ENDPOINTS.excelCustomBytes, 'users_custom.xlsx', 'excelCustomBytesBtn');
+  downloadBinaryFile(
+    ENDPOINTS.excelCustomBytes, 'users_custom.xlsx',
+    'excelCustomBytesBtn', 'card-excelCustomBytes',
+    'Excel Custom Bytes'
+  );
 }
 
-// ── Excel custom headers — base64 ─────────────────────────────────────────────
-async function downloadExcelCustomHeadersBase64() {
-  const btnId = 'excelCustomBase64Btn';
-  uiBusy(btnId, true);
-  setStatus('⏳ Generating Base64 Excel (custom headers) on server…');
-  try {
-    const res  = await fetch(ENDPOINTS.excelCustomBase64);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    setStatus('🔄 Decoding Base64 in browser…');
-    const json   = await res.json();
-    const binary = atob(json.data);
-    const buf    = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
-    const blob   = new Blob([buf], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
-    triggerDownload(blob, json.fileName || 'users_custom.xlsx');
-    setStatus(`✅ Done! (${formatBytes(blob.size)})`);
-    document.getElementById('progress').value = 100;
-  } catch (e) {
-    setStatus('❌ Error: ' + e.message);
-    console.error(e);
-  } finally {
-    uiBusy(btnId, false);
-  }
+function downloadExcelCustomHeadersBase64() {
+  downloadBase64File(
+    ENDPOINTS.excelCustomBase64, 'users_custom.xlsx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'excelCustomBase64Btn', 'card-excelCustomBase64',
+    'Excel Custom Base64'
+  );
 }
 
-// ── Excel custom headers — server file ────────────────────────────────────────
-async function saveExcelCustomHeadersToFile() {
-  const btnId = 'excelCustomFileBtn';
-  uiBusy(btnId, true);
-  setStatus('⏳ Writing Excel (custom headers) to server disk…');
-  try {
-    const res  = await fetch(ENDPOINTS.excelCustomFile);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const json = await res.json();
-    setStatus(`✅ ${json.message}\n📁 ${json.path}`);
-    document.getElementById('progress').value = 100;
-  } catch (e) {
-    setStatus('❌ Error: ' + e.message);
-    console.error(e);
-  } finally {
-    uiBusy(btnId, false);
-  }
+function saveExcelCustomHeadersToFile() {
+  saveToServerFile(
+    ENDPOINTS.excelCustomFile,
+    'excelCustomFileBtn', 'card-excelCustomFile',
+    'Excel Custom Server File'
+  );
 }
 
-// ── Utility ───────────────────────────────────────────────────────────────────
+// =========================================================================
+//  Utility — Trigger browser file download from Blob
+// =========================================================================
 function triggerDownload(blob, fileName) {
   const url  = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = url; link.download = fileName;
+  link.href     = url;
+  link.download = fileName;
   link.style.display = 'none';
   document.body.appendChild(link);
   link.click();
