@@ -26,9 +26,9 @@ Add the library to your `pom.xml` dependencies:
 
 ```xml
 <dependency>
-    <groupId>io.github.prajyotsable</groupId>
-    <artifactId>stream-batch-insert</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <groupId>io.github.prajyot004</groupId>
+    <artifactId>Excel-utility</artifactId>
+    <version>1.0.0</version>
 </dependency>
 ```
 
